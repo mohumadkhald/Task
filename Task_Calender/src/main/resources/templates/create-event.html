@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create New Event</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        .navbar {
+            overflow: hidden;
+            background-color: #333;
+            position: fixed;
+            top: 0;
+            width: 100%;
+        }
+
+        .navbar a {
+            float: right;
+            display: block;
+            color: #f2f2f2;
+            text-align: center;
+            padding: 14px 16px;
+            text-decoration: none;
+            font-size: 17px;
+        }
+
+        .navbar a:hover {
+            background: #ddd;
+            color: black;
+        }
+
+        .content {
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            max-width: 400px;
+            width: 100%;
+            box-sizing: border-box;
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        input[type="text"],
+        input[type="datetime-local"],
+        input[type="email"],
+        button {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background-color: #007bff;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+
+<div class="navbar">
+    <a href="/">Logout</a>
+</div>
+
+<div style="width: 50%; margin: 0 auto; margin-top: 120px; padding: 20px; border: 1px solid gray;">
+    <h2 style="text-align: center; padding-bottom: 20px;">Create New Event</h2>
+
+    <form action="/create-event" method="post">
+        <label for="title">Event Title:</label><br>
+        <input type="text" id="title" name="title" required><br><br>
+
+        <label for="start">Start Date and Time:</label><br>
+        <input type="datetime-local" id="start" name="start" required><br><br>
+
+        <label for="end">End Date and Time:</label><br>
+        <input type="datetime-local" id="end" name="end" required><br><br>
+
+        <!-- Add more input fields for other event details if needed -->
+
+        <input type="submit" value="Create Event">
+    </form>
+</div>
+
+</body>
+</html>

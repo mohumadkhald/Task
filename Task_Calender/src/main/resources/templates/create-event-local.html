@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <title>Create New Event</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .content {
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            max-width: 400px;
+            width: 100%;
+            box-sizing: border-box;
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        input[type="text"],
+        input[type="datetime-local"],
+        input[type="email"],
+        button {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background-color: #007bff;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+        .navbar {
+            overflow: hidden;
+            background-color: #333;
+            position: fixed;
+            top: 0;
+            width: 100%;
+        }
+
+        .navbar a {
+            float: right;
+            display: block;
+            color: #f2f2f2;
+            text-align: center;
+            padding: 14px 16px;
+            text-decoration: none;
+            font-size: 17px;
+        }
+
+        .navbar a:hover {
+            background: #ddd;
+            color: black;
+        }
+    </style>
+</head>
+<body>
+<div class="navbar">
+
+    <a th:href="@{/login}">
+        Sync with Google
+    </a>
+    <a th:href="@{/}" style="float: left;color: white;font-weight:bold;">
+        Dashboard-event-local
+    </a>
+</div>
+<h1 style="text-align: center;">Create New Event</h1>
+<div class="content">
+    <form th:action="@{/create-event-local}" method="post">
+        <label for="title">Title:</label>
+        <input type="text" id="title" name="title">
+
+        <label for="startDateTime">Start Time:</label>
+        <input type="datetime-local" id="startDateTime" name="startDateTime">
+
+        <label for="endDateTime">End Time:</label>
+        <input type="datetime-local" id="endDateTime" name="endDateTime">
+
+        <label for="email">Email:</label>
+        <input type="email" id="email" name="email">
+
+        <button type="submit">Create Event</button>
+    </form>
+</div>
+</body>
+</html>
