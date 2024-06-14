@@ -30,10 +30,9 @@ public class EventService {
     }
 
     public void deleteEvent(Long id) {
-        EventObj event = eventRepository.findById(id).orElse(null);
+        EventObj event = eventRepository.findById(id).get();
         eventRepository.deleteById(id);
         EventsDeleted eventDeleted = new EventsDeleted();
-        assert event != null;
         eventDeleted.setEventId(event.getEventId());
         eventDeletedRepository.save(eventDeleted);
     }

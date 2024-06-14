@@ -72,7 +72,6 @@ public class MainController {
 	public String logout(HttpServletRequest request, HttpServletResponse response) throws IOException {
 		request.getSession().invalidate();
 		isAuthorised = false;
-		syncDeletedEventsWithGoogle();
 		return "login";
 	}
 	private void clearCredentials() {
@@ -116,8 +115,9 @@ public class MainController {
 		return "agenda";
 	}
 	public void sync() {
-		syncEventsWithGoogleCalendar();
 		deleteAllEventsFromCalendar();
+		syncDeletedEventsWithGoogle();
+		syncEventsWithGoogleCalendar();
 	}
 	@RequestMapping(value = "/error", method = RequestMethod.GET)
 	public String accessDenied(Model model) {
@@ -297,18 +297,27 @@ public class MainController {
 					.collect(Collectors.toList());
 
 			for (EventObj event : userEventsToSync) {
+				// Ensure start and end times are valid
+				if (event.getStartDateTime().after(event.getEndDateTime())) {
+					System.out.println("Invalid time range for event: " + event.getTitle());
+					continue;
+				}
+
 				Event googleEvent = new Event()
 						.setSummary(event.getTitle())
 						.setDescription("Event added from application");
 
-				DateTime startDateTime = new DateTime(event.getStartDateTime());
+				// Convert java.sql.Timestamp or java.time.LocalDateTime to com.google.api.client.util.DateTime
+				DateTime startDateTime = convertToGoogleDateTime(event.getStartDateTime());
 				EventDateTime start = new EventDateTime()
-						.setDateTime(startDateTime);
+						.setDateTime(startDateTime)
+						.setTimeZone("UTC"); // Set the time zone explicitly
 				googleEvent.setStart(start);
 
-				DateTime endDateTime = new DateTime(event.getEndDateTime());
+				DateTime endDateTime = convertToGoogleDateTime(event.getEndDateTime());
 				EventDateTime end = new EventDateTime()
-						.setDateTime(endDateTime);
+						.setDateTime(endDateTime)
+						.setTimeZone("UTC"); // Set the time zone explicitly
 				googleEvent.setEnd(end);
 
 				// Insert event into Google Calendar
@@ -320,6 +329,19 @@ public class MainController {
 			}
 		} catch (Exception e) {
 			e.printStackTrace();
+		}
+	}
+
+	private DateTime convertToGoogleDateTime(Object dateTimeObject) {
+		if (dateTimeObject instanceof java.sql.Timestamp) {
+			java.sql.Timestamp timestamp = (java.sql.Timestamp) dateTimeObject;
+			return new DateTime(timestamp.getTime());
+		} else if (dateTimeObject instanceof java.time.LocalDateTime) {
+			java.time.LocalDateTime localDateTime = (java.time.LocalDateTime) dateTimeObject;
+			java.time.ZonedDateTime zonedDateTime = localDateTime.atZone(ZoneId.of("UTC"));
+			return new DateTime(Date.from(zonedDateTime.toInstant()));
+		} else {
+			throw new IllegalArgumentException("Unsupported date time type: " + dateTimeObject.getClass().getName());
 		}
 	}
 	private void syncDeletedEventsWithGoogle() {
