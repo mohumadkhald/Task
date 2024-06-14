@@ -1,5 +1,6 @@
 package org.tasks.task.calendar.controller;
 
+import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -8,6 +9,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 
 import com.google.api.client.googleapis.json.GoogleJsonResponseException;
 import com.google.api.services.calendar.model.EventDateTime;
@@ -41,121 +43,113 @@ import com.google.api.services.calendar.model.Event;
 
 @Controller
 public class MainController {
-
-	private static final String APPLICATION_NAME = "task";
-
-	private static HttpTransport httpTransport;
+	private static final String APPLICATION_NAME = "My First Project";
 	private static final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
 	private static com.google.api.services.calendar.Calendar client;
-	public String email;
-
 	@Autowired
 	private EventDeletedRepository eventDeletedRepository;
-	@Autowired
-	private EventService eventService;
-
 	private static final SimpleDateFormat sdf = new SimpleDateFormat("hh:mm a");
-
-	GoogleClientSecrets clientSecrets;
-	GoogleAuthorizationCodeFlow flow;
-	Credential credential;
-
+	private GoogleClientSecrets clientSecrets;
+	private GoogleAuthorizationCodeFlow flow;
+	private Credential credential;
+	private String email;
 	@Value("${google.client.client-id}")
 	private String clientId;
 	@Value("${google.client.client-secret}")
 	private String clientSecret;
 	@Value("${google.client.redirectUri}")
 	private String redirectURI;
-
-
 	private static boolean isAuthorised = false;
-
+	@Autowired
+	private EventService eventService;
+    @RequestMapping(value = { "/login" }, method = RequestMethod.GET)
+	public String login(Model model) throws IOException {
+		isAuthorised = false;
+		clearCredentials();
+		return "login";
+	}
+	@RequestMapping(value = { "/logout" }, method = RequestMethod.GET)
+	public String logout(HttpServletRequest request, HttpServletResponse response) throws IOException {
+		request.getSession().invalidate();
+		isAuthorised = false;
+		syncDeletedEventsWithGoogle();
+		return "login";
+	}
+	private void clearCredentials() {
+		if (credential != null) {
+			credential = null;
+		}
+		if (client != null) {
+			client = null;
+		}
+		flow = null;  // Clear the flow to ensure it's re-initialized on the next authorization request.
+	}
 	private String authorize(String redirectURL) throws Exception {
-		AuthorizationCodeRequestUrl authorizationUrl;
 		if (flow == null) {
-			Details web = new Details();
+			GoogleClientSecrets.Details web = new GoogleClientSecrets.Details();
 			web.setClientId(clientId);
 			web.setClientSecret(clientSecret);
 			clientSecrets = new GoogleClientSecrets().setWeb(web);
-			httpTransport = GoogleNetHttpTransport.newTrustedTransport();
+			HttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
 			flow = new GoogleAuthorizationCodeFlow.Builder(httpTransport, JSON_FACTORY, clientSecrets,
-					Collections.singleton(CalendarScopes.CALENDAR)).build();
+					Collections.singleton(CalendarScopes.CALENDAR)).setAccessType("offline").build();
 		}
-		authorizationUrl = flow.newAuthorizationUrl().setRedirectUri(redirectURL);
-
+		AuthorizationCodeRequestUrl authorizationUrl = flow.newAuthorizationUrl().setRedirectUri(redirectURL);
 		isAuthorised = true;
-
 		return authorizationUrl.build();
 	}
-
 	@RequestMapping(value = "/calendar", method = RequestMethod.GET)
 	public RedirectView googleConnectionStatus(HttpServletRequest request) throws Exception {
 		return new RedirectView(authorize(redirectURI));
 	}
-
-
-
 	@RequestMapping(value = "/calendar", method = RequestMethod.GET, params = "code")
 	public String oauth2Callback(@RequestParam(value = "code") String code, Model model) {
-		if (isAuthorised) {
-			try {
-				model.addAttribute("title", "Today's Calendar Events");
-				model.addAttribute("calendarObjs", getTodaysCalendarEventList(code, redirectURI));
-				handlePostLoginActions();
-			} catch (Exception e) {
-				model.addAttribute("calendarObjs", new ArrayList<CalendarObj>());
-			}
-
-			return "agenda";
-		} else {
-			return "/";
+		try {
+			ensureClientInitialization(code, redirectURI);
+			sync();
+			model.addAttribute("title", "Today's Calendar Events");
+			model.addAttribute("calendarObjs", getTodaysCalendarEventList(null, null));
+		} catch (Exception e) {
+			model.addAttribute("calendarObjs", new ArrayList<>());
+			e.printStackTrace();
 		}
+		return "agenda";
 	}
-
-
-
-
-
+	public void sync() {
+		syncEventsWithGoogleCalendar();
+		deleteAllEventsFromCalendar();
+	}
 	@RequestMapping(value = "/error", method = RequestMethod.GET)
 	public String accessDenied(Model model) {
 		model.addAttribute("message", "Not authorised.");
 		return "login";
 	}
+	private void ensureClientInitialization(String code, String redirectURL) throws Exception {
+		if (flow == null) {
+			GoogleClientSecrets.Details web = new GoogleClientSecrets.Details();
+			web.setClientId(clientId);
+			web.setClientSecret(clientSecret);
+			clientSecrets = new GoogleClientSecrets().setWeb(web);
+			HttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
+			flow = new GoogleAuthorizationCodeFlow.Builder(httpTransport, JSON_FACTORY, clientSecrets,
+					Collections.singleton(CalendarScopes.CALENDAR)).setAccessType("offline").build();
+		}
 
-	@RequestMapping(value = {"/login", "/logout"}, method = RequestMethod.GET)
-	public String login(Model model) {
-		isAuthorised = false;
-		return "login";
-	}
-
-	private void handlePostLoginActions() {
-		deleteAllEventsFromCalendar();
-		syncDeletedEventsWithGoogle();
-		syncEventsWithGoogleCalendar();
-	}
-
-	private void deleteAllEventsFromCalendar() {
-		try {
-			if (client == null || credential == null) {
-				return;
+		if (credential == null || client == null) {
+			if (code != null) {
+				TokenResponse response = flow.newTokenRequest(code).setRedirectUri(redirectURL).execute();
+				credential = flow.createAndStoreCredential(response, "userID");
 			}
-			List<EventsDeleted> deletedEvents = eventDeletedRepository.findAll();
-			for (EventsDeleted deletedEvent : deletedEvents) {
-				try {
-					client.events().delete("primary", deletedEvent.getEventId()).execute();
-				} catch (GoogleJsonResponseException e) {
-					if (e.getStatusCode() == 410) {
-						System.out.println("Event " + deletedEvent.getEventId() + " has already been deleted.");
-					} else {
-						throw e;
-					}
-				}
+
+			if (credential != null) {
+				HttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
+				client = new com.google.api.services.calendar.Calendar.Builder(httpTransport, JSON_FACTORY, credential)
+						.setApplicationName(APPLICATION_NAME).build();
+			} else {
+				throw new Exception("Failed to initialize Google Calendar client and credentials.");
 			}
-		} catch (Exception e) {
-			e.printStackTrace();
 		}
 	}
-
 	private List<CalendarObj> getTodaysCalendarEventList(String calendarApiCode, String redirectURL) {
 		try {
 			LocalDateTime localDateTime = LocalDateTime.ofInstant(new Date().toInstant(), ZoneId.systemDefault());
@@ -170,7 +164,7 @@ public class MainController {
 				credential = flow.createAndStoreCredential(response, "userID");
 			}
 
-			httpTransport = GoogleNetHttpTransport.newTrustedTransport();
+			HttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
 			client = new com.google.api.services.calendar.Calendar.Builder(httpTransport, JSON_FACTORY, credential)
 					.setApplicationName(APPLICATION_NAME).build();
 			Events events = client.events();
@@ -227,14 +221,12 @@ public class MainController {
 			return new ArrayList<>();
 		}
 	}
-
 	@GetMapping("/create")
 	public String showCreateEventForm(Model model) {
 		return "create-event";
 	}
-
 	@PostMapping("/create-event")
-	public  String createEvent(@RequestParam String title,
+	public  @ResponseBody String createEvent(@RequestParam String title,
 											@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime start,
 											@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime end) {
 		try {
@@ -261,7 +253,7 @@ public class MainController {
 			eventEntity.setEmail(createdEvent.getCreator().getEmail());
 			eventService.save(eventEntity); // Save event to your database
 
-			return "redirect:/";
+			return "event have been created " + createdEvent.getId();
 		} catch (GoogleJsonResponseException e) {
 			if (e.getStatusCode() == 410) {
 				return "Error: Event resource has been deleted.";
@@ -274,10 +266,8 @@ public class MainController {
 			return "Error occurred while creating the event: " + e.getMessage();
 		}
 	}
-
-
 	@RequestMapping(value = "/delete-event", method = RequestMethod.POST)
-	public String deleteEvent(@RequestParam String eventId) {
+	public @ResponseBody String deleteEvent(@RequestParam String eventId) {
 		try {
 			if (client == null || credential == null) {
 				return "Error: Google Calendar client or credential not initialized";
@@ -287,13 +277,12 @@ public class MainController {
 			EventObj eventObj = eventService.findByEventId(eventId).get();
 			eventService.deleteEvent(eventObj.getId());
 
-			return "redirect:/";
+			return "the event has  been deleted";
 		} catch (Exception e) {
 			e.printStackTrace();
 			return "Error occurred while deleting the event: " + e.getMessage();
 		}
 	}
-
 	private void syncEventsWithGoogleCalendar() {
 		try {
 			// Fetch events from the database with eventId as null or empty
@@ -333,15 +322,31 @@ public class MainController {
 			e.printStackTrace();
 		}
 	}
-
-	// Assuming you have a method to get the current user's email
-	private String getCurrentUserEmail() {
-		return email;
-	}
-
-	// delete all event from google when login after deleted it local
 	private void syncDeletedEventsWithGoogle() {
 		eventService.syncDeletedEvents();
 	}
-
+	private void deleteAllEventsFromCalendar() {
+		try {
+			if (client == null || credential == null) {
+				return;
+			}
+			List<EventsDeleted> deletedEvents = eventDeletedRepository.findAll();
+			for (EventsDeleted deletedEvent : deletedEvents) {
+				try {
+					client.events().delete("primary", deletedEvent.getEventId()).execute();
+				} catch (GoogleJsonResponseException e) {
+					if (e.getStatusCode() == 410) {
+						System.out.println("Event " + deletedEvent.getEventId() + " has already been deleted.");
+					} else {
+						throw e;
+					}
+				}
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+	private String getCurrentUserEmail() {
+		return email;
+	}
 }
