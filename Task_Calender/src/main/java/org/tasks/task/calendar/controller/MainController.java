@@ -2,6 +2,7 @@ package org.tasks.task.calendar.controller;
 
 import java.io.IOException;
 import java.text.SimpleDateFormat;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
@@ -11,7 +12,10 @@ import java.util.stream.Collectors;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import com.google.api.client.auth.oauth2.TokenResponseException;
 import com.google.api.client.googleapis.json.GoogleJsonResponseException;
+import com.google.api.services.calendar.model.CalendarList;
+import com.google.api.services.calendar.model.CalendarListEntry;
 import com.google.api.services.calendar.model.EventDateTime;
 import org.tasks.task.calendar.events.EventDeletedRepository;
 import org.tasks.task.calendar.events.EventService;
@@ -101,24 +105,6 @@ public class MainController {
 	public RedirectView googleConnectionStatus(HttpServletRequest request) throws Exception {
 		return new RedirectView(authorize(redirectURI));
 	}
-	@RequestMapping(value = "/calendar", method = RequestMethod.GET, params = "code")
-	public String oauth2Callback(@RequestParam(value = "code") String code, Model model) {
-		try {
-			ensureClientInitialization(code, redirectURI);
-			sync();
-			model.addAttribute("title", "Today's Calendar Events");
-			model.addAttribute("calendarObjs", getTodaysCalendarEventList(null, null));
-		} catch (Exception e) {
-			model.addAttribute("calendarObjs", new ArrayList<>());
-			e.printStackTrace();
-		}
-		return "agenda";
-	}
-	public void sync() {
-		deleteAllEventsFromCalendar();
-		syncDeletedEventsWithGoogle();
-		syncEventsWithGoogleCalendar();
-	}
 	@RequestMapping(value = "/error", method = RequestMethod.GET)
 	public String accessDenied(Model model) {
 		model.addAttribute("message", "Not authorised.");
@@ -137,8 +123,14 @@ public class MainController {
 
 		if (credential == null || client == null) {
 			if (code != null) {
-				TokenResponse response = flow.newTokenRequest(code).setRedirectUri(redirectURL).execute();
-				credential = flow.createAndStoreCredential(response, "userID");
+				try {
+					TokenResponse response = flow.newTokenRequest(code).setRedirectUri(redirectURL).execute();
+					credential = flow.createAndStoreCredential(response, "userID");
+				} catch (TokenResponseException e) {
+					System.err.println("Error during token exchange: " + e.getDetails().getError());
+					System.err.println("Error description: " + e.getDetails().getErrorDescription());
+					throw e;
+				}
 			}
 
 			if (credential != null) {
@@ -150,26 +142,56 @@ public class MainController {
 			}
 		}
 	}
-	private List<CalendarObj> getTodaysCalendarEventList(String calendarApiCode, String redirectURL) {
+	@RequestMapping(value = "/calendar", method = RequestMethod.GET, params = "code")
+	public String oauth2Callback(@RequestParam(value = "code") String code, Model model) {
 		try {
-			LocalDateTime localDateTime = LocalDateTime.ofInstant(new Date().toInstant(), ZoneId.systemDefault());
-			LocalDateTime startOfDay = localDateTime.with(LocalTime.MIN);
-			LocalDateTime endOfDay = localDateTime.with(LocalTime.MAX);
+			// Initialize the client with the code
+			ensureClientInitialization(code, redirectURI);
+			sync();
+			// Display events for the current date
+			return displayEventsForDate(LocalDate.now().toString(), code, model);
+		} catch (Exception e) {
+			model.addAttribute("calendarObjs", new ArrayList<>());
+			e.printStackTrace();
+			return "agenda";
+		}
+	}
+	@RequestMapping(value = "/calendar", method = RequestMethod.GET, params = { "date" })
+	public String displayEventsForDate(@RequestParam(value = "date") String dateStr, @RequestParam(value = "code", required = false) String code, Model model) {
+		try {
+			if (dateStr == null || dateStr.isEmpty()) {
+				dateStr = LocalDate.now().toString();
+			}
+			LocalDate date = LocalDate.parse(dateStr);
+			if (code != null && !code.isEmpty()) {
+				ensureClientInitialization(code, redirectURI);
+			}
+			model.addAttribute("title", "Calendar Events for " + date);
+			model.addAttribute("calendarObjs", CalendarEventList(code, redirectURI, date));
+		} catch (Exception e) {
+			model.addAttribute("calendarObjs", new ArrayList<>());
+			e.printStackTrace();
+		}
+		return "agenda";
+	}
+	private List<CalendarObj> CalendarEventList(String calendarApiCode, String redirectURL, LocalDate date) {
+		try {
+			LocalDateTime startOfDay = date.atStartOfDay();
+			LocalDateTime endOfDay = date.atTime(LocalTime.MAX);
 
 			DateTime date1 = new DateTime(Date.from(startOfDay.atZone(ZoneId.systemDefault()).toInstant()));
 			DateTime date2 = new DateTime(Date.from(endOfDay.atZone(ZoneId.systemDefault()).toInstant()));
-
-			if (calendarApiCode != null) {
-				TokenResponse response = flow.newTokenRequest(calendarApiCode).setRedirectUri(redirectURL).execute();
-				credential = flow.createAndStoreCredential(response, "userID");
-			}
 
 			HttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
 			client = new com.google.api.services.calendar.Calendar.Builder(httpTransport, JSON_FACTORY, credential)
 					.setApplicationName(APPLICATION_NAME).build();
 			Events events = client.events();
-			com.google.api.services.calendar.model.Events eventList = events.list("primary").setSingleEvents(true).setTimeMin(date1).setTimeMax(date2)
-					.setOrderBy("startTime").execute();
+			com.google.api.services.calendar.model.Events eventList = events.list("primary")
+					.setSingleEvents(true)
+					.setTimeMin(date1)
+					.setTimeMax(date2)
+					.setOrderBy("startTime")
+					.execute();
 
 			List<Event> items = eventList.getItems();
 			List<CalendarObj> calendarObjs = new ArrayList<>();
@@ -193,11 +215,6 @@ public class MainController {
 					calendarObj.setEmail(event.getCreator().getEmail());
 					calendarObj.setEventId(event.getId());
 					calendarObj.setStartEnd(sdf.format(startDateTime) + " - " + sdf.format(endDateTime));
-					if (event.getCreator().getEmail() == null) {
-						email = "Email@test.com";
-					} else {
-						email = event.getOrganizer().getEmail();
-					}
 					Optional<EventObj> existingEvent = eventService.findByEventId(event.getId());
 					if (!existingEvent.isPresent()) {
 						EventObj eventEntity = new EventObj();
@@ -216,10 +233,20 @@ public class MainController {
 
 			return calendarObjs;
 
+		} catch (TokenResponseException e) {
+			System.err.println("Error during token exchange: " + e.getDetails().getError());
+			System.err.println("Error description: " + e.getDetails().getErrorDescription());
+			e.printStackTrace();
+			return new ArrayList<>();
 		} catch (Exception e) {
 			e.printStackTrace();
 			return new ArrayList<>();
 		}
+	}
+	public void sync() {
+		deleteAllEventsFromCalendar();
+		syncDeletedEventsWithGoogle();
+		syncEventsWithGoogleCalendar();
 	}
 	@GetMapping("/create")
 	public String showCreateEventForm(Model model) {
@@ -331,14 +358,13 @@ public class MainController {
 			e.printStackTrace();
 		}
 	}
-
 	private DateTime convertToGoogleDateTime(Object dateTimeObject) {
 		if (dateTimeObject instanceof java.sql.Timestamp) {
 			java.sql.Timestamp timestamp = (java.sql.Timestamp) dateTimeObject;
 			return new DateTime(timestamp.getTime());
 		} else if (dateTimeObject instanceof java.time.LocalDateTime) {
 			java.time.LocalDateTime localDateTime = (java.time.LocalDateTime) dateTimeObject;
-			java.time.ZonedDateTime zonedDateTime = localDateTime.atZone(ZoneId.of("UTC"));
+			java.time.ZonedDateTime zonedDateTime = localDateTime.atZone(ZoneId.systemDefault());
 			return new DateTime(Date.from(zonedDateTime.toInstant()));
 		} else {
 			throw new IllegalArgumentException("Unsupported date time type: " + dateTimeObject.getClass().getName());
@@ -368,7 +394,15 @@ public class MainController {
 			e.printStackTrace();
 		}
 	}
-	private String getCurrentUserEmail() {
+	private String getCurrentUserEmail() throws IOException {
+		// Retrieve calendar list
+		CalendarList calendarList = client.calendarList().list().execute();
+		for (CalendarListEntry calendarListEntry : calendarList.getItems()) {
+			if (calendarListEntry.getPrimary() != null && calendarListEntry.getPrimary()) {
+				email = calendarListEntry.getSummary(); // Assuming summary is the email
+				break;
+			}
+		}
 		return email;
 	}
 }

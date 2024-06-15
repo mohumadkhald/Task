@@ -22,7 +22,7 @@ body {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-} 
+}
 
 .btn {
   padding: 12px;
@@ -31,7 +31,7 @@ body {
   font-size: 17px;
   margin: 35%;
   line-height: 20px;
-  text-decoration: none; 
+  text-decoration: none;
 }
 
 .google {
@@ -63,7 +63,8 @@ body {
 }
 
 </style>
-
+  <meta name="google-signin-client_id" content="825500177395-u6vp3jvoasn4f8f25fpua6m0gvs1eh5g.apps.googleusercontent.com">
+  <script src="https://apis.google.com/js/platform.js" async defer></script>
 </head>
 <body>
 <div class="navbar">
@@ -75,15 +76,23 @@ body {
 
 <div class="container">
   <h2 style="text-align:center">Spring Boot Application : Calendar Event</h2>
-  
+
   <div>
     <a th:href="@{/calendar}" class="google btn">
     	<i class="fa fa-google fa-fw"></i> Login with Google
     </a>
   </div>
+
+<!--  <div class="g-signin2" data-onsuccess="onSignIn"></div>-->
+  <script>
+    function onSignIn(googleUser) {
+      var profile = googleUser.getBasicProfile();
+      console.log('ID: ' + profile.getId()); // Do not send to your backend! Use an ID token instead.
+      console.log('Name: ' + profile.getName());
+      console.log('Image URL: ' + profile.getImageUrl());
+      console.log('Email: ' + profile.getEmail()); // This is null if the 'email' scope is not present.
+    }
+  </script>
 </div>
-
-
-
 </body>
 </html>
